@@ -84,7 +84,10 @@ class HolidayState {
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 class ChatProvider extends ChangeNotifier {
-  static const _baseUrl = 'http://localhost:3000';
+  static const _baseUrl = String.fromEnvironment(
+    'API_URL',
+    defaultValue: 'http://localhost:3000',
+  );
 
   final String sessionId = const Uuid().v4();
   final List<ChatMessage> messages = [];

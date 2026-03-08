@@ -29,9 +29,13 @@ gcloud run deploy $SERVICE \
   --max-instances=2
 
 # Deploy Flutter web to Firebase Hosting
+echo "==> Getting Cloud Run URL..."
+API_URL=$(gcloud run services describe $SERVICE --region $REGION --format "value(status.url)")
+echo "    API URL: $API_URL"
+
 echo "==> Building Flutter web..."
 cd app
-flutter build web --release
+flutter build web --release --dart-define=API_URL=$API_URL
 cd ..
 
 echo "==> Deploying to Firebase Hosting..."
