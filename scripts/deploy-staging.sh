@@ -13,7 +13,7 @@ gcloud config set project $PROJECT_ID
 
 # Build & push container
 echo "==> Building image..."
-gcloud builds submit . --tag $IMAGE --config server/cloudbuild.yaml 2>/dev/null || gcloud builds submit . --tag $IMAGE
+gcloud builds submit . --tag $IMAGE --dockerfile server/Dockerfile
 
 # Deploy to Cloud Run
 echo "==> Deploying to Cloud Run..."
