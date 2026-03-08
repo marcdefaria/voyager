@@ -5,3 +5,4 @@ app/build/
 app/.flutter-plugins
 app/.flutter-plugins-dependencies
 *.g.dart
+server/service-account.json
