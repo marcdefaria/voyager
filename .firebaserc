@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "staging": "voyager-staging-f3e0f",
+    "prod": "voyager-prod-e632b"
+  }
+}

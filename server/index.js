@@ -1,9 +1,15 @@
 require('dotenv').config();
-const express = require('express');
-const cors    = require('cors');
-const fs      = require('fs');
-const path    = require('path');
-const Anthropic = require('@anthropic-ai/sdk');
+const express   = require('express');
+const cors      = require('cors');
+const fs        = require('fs');
+const path      = require('path');
+const Anthropic  = require('@anthropic-ai/sdk');
+const { initializeApp, applicationDefault } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+
+// ─── Firebase Admin (uses ADC on Cloud Run, key file locally) ────────────────
+initializeApp({ credential: applicationDefault() });
+const db = getFirestore();
 
 const app    = express();
 const client = new Anthropic.default();
@@ -23,15 +29,34 @@ const PRICING = {
 };
 const MODEL = process.env.MODEL || 'claude-opus-4-6';
 
-// ─── In-memory conversation store (keyed by sessionId) ───────────────────────
-// Each session: { history: [{role, content}], state: {} }
-const sessions = {};
+// ─── Firestore helpers ────────────────────────────────────────────────────────
 
-function getSession(id) {
-  if (!sessions[id]) {
-    sessions[id] = { history: [], state: {} };
-  }
-  return sessions[id];
+async function getHistory(sessionId) {
+  const snap = await db
+    .collection('sessions').doc(sessionId)
+    .collection('messages')
+    .orderBy('timestamp')
+    .get();
+  return snap.docs.map(d => ({ role: d.data().role, content: d.data().content }));
+}
+
+async function getState(sessionId) {
+  const doc = await db.collection('sessions').doc(sessionId).get();
+  return doc.exists ? (doc.data().state ?? {}) : {};
+}
+
+async function saveMessage(sessionId, role, content) {
+  await db
+    .collection('sessions').doc(sessionId)
+    .collection('messages')
+    .add({ role, content, timestamp: FieldValue.serverTimestamp() });
+}
+
+async function saveState(sessionId, state) {
+  await db.collection('sessions').doc(sessionId).set(
+    { state, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true }
+  );
 }
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -41,14 +66,11 @@ app.use(express.json());
 // ─── POST /chat ───────────────────────────────────────────────────────────────
 app.post('/chat', async (req, res) => {
   const { sessionId = 'default', message } = req.body;
+  if (!message) return res.status(400).json({ error: 'message is required' });
 
-  if (!message) {
-    return res.status(400).json({ error: 'message is required' });
-  }
+  await saveMessage(sessionId, 'user', message);
 
-  const session = getSession(sessionId);
-  session.history.push({ role: 'user', content: message });
-
+  const history = await getHistory(sessionId);
   const startMs = Date.now();
 
   try {
@@ -56,43 +78,33 @@ app.post('/chat', async (req, res) => {
       model: MODEL,
       max_tokens: 2048,
       system: SYSTEM_PROMPT,
-      messages: session.history,
+      messages: history,
     });
 
     const elapsedMs = Date.now() - startMs;
     const { input_tokens, output_tokens } = response.usage;
-    const pricing    = PRICING[MODEL] ?? { input: 0, output: 0 };
-    const totalCost  = ((input_tokens / 1e6) * pricing.input) +
-                       ((output_tokens / 1e6) * pricing.output);
+    const pricing   = PRICING[MODEL] ?? { input: 0, output: 0 };
+    const totalCost = ((input_tokens / 1e6) * pricing.input) +
+                      ((output_tokens / 1e6) * pricing.output);
 
-    // ── Observability ──
-    console.log(`[${new Date().toISOString()}] session=${sessionId}`);
-    console.log(`  model=${MODEL}  time=${elapsedMs}ms`);
-    console.log(`  tokens in=${input_tokens} out=${output_tokens}`);
-    console.log(`  cost=$${totalCost.toFixed(6)}`);
+    console.log(`[${new Date().toISOString()}] session=${sessionId} time=${elapsedMs}ms in=${input_tokens} out=${output_tokens} cost=$${totalCost.toFixed(6)}`);
 
     const rawText = response.content.find(b => b.type === 'text')?.text ?? '{}';
 
-    // ── Parse structured response ──
     let parsed;
     try {
-      // Strip markdown code fences if present
       const cleaned = rawText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
       parsed = JSON.parse(cleaned);
     } catch {
-      // Fallback: treat entire text as message, no state update
-      parsed = { message: rawText, state: session.state };
+      parsed = { message: rawText, state: await getState(sessionId) };
     }
 
-    // Persist latest state
-    if (parsed.state) session.state = parsed.state;
-
-    // Append assistant reply to history (store raw text for context continuity)
-    session.history.push({ role: 'assistant', content: rawText });
+    await saveMessage(sessionId, 'assistant', rawText);
+    if (parsed.state) await saveState(sessionId, parsed.state);
 
     res.json({
-      message:   parsed.message ?? '',
-      state:     session.state,
+      message: parsed.message ?? '',
+      state:   parsed.state ?? {},
       meta: {
         model:        MODEL,
         responseMs:   elapsedMs,
@@ -103,21 +115,23 @@ app.post('/chat', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Anthropic error:', err.message);
+    console.error('Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── GET /session/:id — fetch current state ───────────────────────────────────
-app.get('/session/:id', (req, res) => {
-  const session = sessions[req.params.id];
-  if (!session) return res.json({ history: [], state: {} });
-  res.json({ history: session.history, state: session.state });
+// ─── GET /session/:id ─────────────────────────────────────────────────────────
+app.get('/session/:id', async (req, res) => {
+  const [history, state] = await Promise.all([
+    getHistory(req.params.id),
+    getState(req.params.id),
+  ]);
+  res.json({ history, state });
 });
 
-// ─── DELETE /session/:id — reset ─────────────────────────────────────────────
-app.delete('/session/:id', (req, res) => {
-  delete sessions[req.params.id];
+// ─── DELETE /session/:id ──────────────────────────────────────────────────────
+app.delete('/session/:id', async (req, res) => {
+  await db.collection('sessions').doc(req.params.id).delete();
   res.json({ ok: true });
 });
 
