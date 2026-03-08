@@ -3,6 +3,4 @@ server/.env
 server/service-account.json
 app/
 scripts/
-*.md
-!voyager_system_prompt.md
 .git/

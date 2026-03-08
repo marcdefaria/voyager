@@ -2,10 +2,11 @@ FROM node:20-slim
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY server/package*.json ./
 RUN npm ci --only=production
 
-COPY . .
+COPY server/ .
+COPY voyager_system_prompt.md ./
 
 EXPOSE 3000
 

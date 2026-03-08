@@ -17,7 +17,7 @@ const PORT   = process.env.PORT || 3000;
 
 // ─── Load system prompt ───────────────────────────────────────────────────────
 const SYSTEM_PROMPT = fs.readFileSync(
-  path.join(__dirname, '../voyager_system_prompt.md'),
+  path.join(__dirname, 'voyager_system_prompt.md'),
   'utf8'
 );
 

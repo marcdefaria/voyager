@@ -16,7 +16,7 @@ fi
 gcloud config set project $PROJECT_ID
 
 echo "==> Building image..."
-gcloud builds submit ./server --tag $IMAGE
+gcloud builds submit . --tag $IMAGE
 
 echo "==> Deploying to Cloud Run..."
 gcloud run deploy $SERVICE \
