@@ -30,7 +30,7 @@ gcloud run deploy $SERVICE \
 
 # Deploy Flutter web to Firebase Hosting
 echo "==> Getting Cloud Run URL..."
-API_URL=$(gcloud run services describe $SERVICE --region $REGION --format "value(status.url)")
+API_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT_ID --format "value(status.url)")
 echo "    API URL: $API_URL"
 
 echo "==> Building Flutter web..."
