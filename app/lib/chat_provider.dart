@@ -76,7 +76,12 @@ class HolidayState {
 
   static List<String> _toStringList(dynamic v) {
     if (v == null) return [];
-    if (v is List) return v.map((e) => e.toString()).toList();
+    if (v is List) {
+      return v.map((e) {
+        if (e is Map) return (e['name'] ?? e.values.firstOrNull)?.toString() ?? '';
+        return e.toString();
+      }).where((s) => s.isNotEmpty).toList();
+    }
     return [];
   }
 }

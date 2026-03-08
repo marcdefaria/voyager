@@ -40,7 +40,7 @@ Every response MUST be valid JSON with this exact shape:
     "destination": null,
     "dates": { "from": null, "to": null },
     "duration": null,
-    "travellers": [],
+    "travellers": ["Alice", "Bob"],
     "budget": null,
     "accommodation": null,
     "vibe": [],
