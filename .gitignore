@@ -7,3 +7,4 @@ app/.flutter-plugins-dependencies
 *.g.dart
 server/service-account.json
 .DS_Store
+.firebase/
