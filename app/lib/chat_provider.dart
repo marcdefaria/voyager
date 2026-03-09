@@ -29,6 +29,7 @@ class Todo {
 }
 
 class HolidayState {
+  final String? tripTitle;
   final String? destination;
   final String? dateFrom;
   final String? dateTo;
@@ -42,6 +43,7 @@ class HolidayState {
   final List<Todo> todos;
 
   const HolidayState({
+    this.tripTitle,
     this.destination,
     this.dateFrom,
     this.dateTo,
@@ -58,6 +60,7 @@ class HolidayState {
   factory HolidayState.fromJson(Map<String, dynamic> j) {
     final dates = j['dates'] as Map<String, dynamic>? ?? {};
     return HolidayState(
+      tripTitle:     j['tripTitle'] as String?,
       destination:   j['destination'] as String?,
       dateFrom:      dates['from'] as String?,
       dateTo:        dates['to'] as String?,
@@ -94,11 +97,19 @@ class ChatProvider extends ChangeNotifier {
     defaultValue: 'http://localhost:3000',
   );
 
-  final String sessionId = const Uuid().v4();
-  final List<ChatMessage> messages = [];
-  HolidayState state = const HolidayState();
+  final String sessionId;
+  final List<ChatMessage> messages;
+  HolidayState state;
   bool isLoading = false;
   String? error;
+
+  ChatProvider({
+    String? sessionId,
+    HolidayState? initialState,
+    List<ChatMessage>? initialMessages,
+  })  : sessionId = sessionId ?? const Uuid().v4(),
+        state = initialState ?? const HolidayState(),
+        messages = List.from(initialMessages ?? []);
 
   // Last call metadata
   int? lastResponseMs;

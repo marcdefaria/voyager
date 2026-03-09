@@ -6,6 +6,7 @@ const path      = require('path');
 const Anthropic  = require('@anthropic-ai/sdk');
 const { initializeApp, applicationDefault } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getTools, executeTool } = require('./tools');
 
 // ─── Firebase Admin (uses ADC on Cloud Run, key file locally) ────────────────
 initializeApp({ credential: applicationDefault() });
@@ -17,7 +18,7 @@ const PORT   = process.env.PORT || 3000;
 
 // ─── Load system prompt ───────────────────────────────────────────────────────
 const SYSTEM_PROMPT = fs.readFileSync(
-  path.join(__dirname, 'voyager_system_prompt.md'),
+  path.join(__dirname, '..', 'voyager_system_prompt.md'),
   'utf8'
 );
 
@@ -27,7 +28,7 @@ const PRICING = {
   'claude-sonnet-4-6': { input: 3.00,  output: 15.00 },
   'claude-haiku-4-5':  { input: 1.00,  output: 5.00  },
 };
-const MODEL = process.env.MODEL || 'claude-opus-4-6';
+const MODEL = process.env.MODEL || 'claude-haiku-4-5';
 
 // ─── Firestore helpers ────────────────────────────────────────────────────────
 
@@ -74,20 +75,56 @@ app.post('/chat', async (req, res) => {
   const startMs = Date.now();
 
   try {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 2048,
-      system: SYSTEM_PROMPT,
-      messages: history,
-    });
+    const tools    = getTools();
+    let messages   = [...history];
+    let totalIn    = 0;
+    let totalOut   = 0;
+    let response;
+
+    // ── Tool loop ──────────────────────────────────────────────────────────────
+    do {
+      response = await client.messages.create({
+        model:      MODEL,
+        max_tokens: 2048,
+        system:     SYSTEM_PROMPT,
+        messages,
+        ...(tools.length > 0 && { tools }),
+      });
+
+      totalIn  += response.usage.input_tokens;
+      totalOut += response.usage.output_tokens;
+
+      if (response.stop_reason === 'tool_use') {
+        const toolBlocks = response.content.filter(b => b.type === 'tool_use');
+
+        // Append assistant turn (contains tool_use blocks)
+        messages.push({ role: 'assistant', content: response.content });
+
+        // Execute tools in parallel
+        const toolResults = await Promise.all(
+          toolBlocks.map(async (block) => {
+            console.log(`[tool:${block.name}] query:`, block.input);
+            const result = await executeTool(block.name, block.input);
+            console.log(`[tool:${block.name}] result: ${result.slice(0, 120)}...`);
+            return {
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: result + '\n\n[Reminder: your response MUST be the JSON format specified in the system prompt. Put your answer inside the "message" field.]',
+            };
+          })
+        );
+
+        // Append tool results as a user turn
+        messages.push({ role: 'user', content: toolResults });
+      }
+    } while (response.stop_reason === 'tool_use');
+    // ── End tool loop ──────────────────────────────────────────────────────────
 
     const elapsedMs = Date.now() - startMs;
-    const { input_tokens, output_tokens } = response.usage;
     const pricing   = PRICING[MODEL] ?? { input: 0, output: 0 };
-    const totalCost = ((input_tokens / 1e6) * pricing.input) +
-                      ((output_tokens / 1e6) * pricing.output);
+    const totalCost = ((totalIn / 1e6) * pricing.input) + ((totalOut / 1e6) * pricing.output);
 
-    console.log(`[${new Date().toISOString()}] session=${sessionId} time=${elapsedMs}ms in=${input_tokens} out=${output_tokens} cost=$${totalCost.toFixed(6)}`);
+    console.log(`[${new Date().toISOString()}] session=${sessionId} time=${elapsedMs}ms in=${totalIn} out=${totalOut} cost=$${totalCost.toFixed(6)}`);
 
     const rawText = response.content.find(b => b.type === 'text')?.text ?? '{}';
 
@@ -96,7 +133,10 @@ app.post('/chat', async (req, res) => {
       const cleaned = rawText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
       parsed = JSON.parse(cleaned);
     } catch {
-      parsed = { message: rawText, state: await getState(sessionId) };
+      // Claude didn't return JSON — preserve existing state, show message as-is
+      const existingState = await getState(sessionId);
+      parsed = { message: rawText, state: existingState };
+      console.warn('[warn] Claude response was not JSON — state preserved from Firestore');
     }
 
     await saveMessage(sessionId, 'assistant', rawText);
@@ -108,8 +148,8 @@ app.post('/chat', async (req, res) => {
       meta: {
         model:        MODEL,
         responseMs:   elapsedMs,
-        inputTokens:  input_tokens,
-        outputTokens: output_tokens,
+        inputTokens:  totalIn,
+        outputTokens: totalOut,
         costUsd:      totalCost,
       },
     });
@@ -138,4 +178,6 @@ app.delete('/session/:id', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Voyager server running on http://localhost:${PORT}`);
   console.log(`Model: ${MODEL}`);
+  const activeTools = getTools().map(t => t.name);
+  console.log(`Tools: ${activeTools.length ? activeTools.join(', ') : 'none'}`);
 });
