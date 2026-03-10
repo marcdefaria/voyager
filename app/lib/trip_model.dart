@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'chat_provider.dart';
 
 enum TripStatus { dreaming, planning, booked, ready }
@@ -30,6 +31,23 @@ class Trip {
         messages = messages ?? [];
 
   String get displayName => state.tripTitle ?? state.destination ?? 'New Trip';
+
+  Map<String, dynamic> toFirestore() => {
+    'id':          id,
+    'createdAt':   Timestamp.fromDate(createdAt),
+    'state':       state.toJson(),
+    'participants': participants,
+  };
+
+  factory Trip.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final d = doc.data()!;
+    return Trip(
+      id:           d['id'] as String,
+      createdAt:    (d['createdAt'] as Timestamp).toDate(),
+      state:        HolidayState.fromJson(d['state'] as Map<String, dynamic>? ?? {}),
+      participants: List<String>.from(d['participants'] ?? []),
+    );
+  }
 
   TripStatus get status {
     if (state.destination == null) return TripStatus.dreaming;

@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Server sessions — written by Admin SDK only, no client access
+    match /sessions/{sessionId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    // User trips — each user can only access their own
+    match /users/{userId}/trips/{tripId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

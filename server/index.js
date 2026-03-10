@@ -28,7 +28,8 @@ const PRICING = {
   'claude-sonnet-4-6': { input: 3.00,  output: 15.00 },
   'claude-haiku-4-5':  { input: 1.00,  output: 5.00  },
 };
-const MODEL = process.env.MODEL || 'claude-haiku-4-5';
+const MODEL            = process.env.MODEL || 'claude-haiku-4-5';
+const MODEL_WITH_TOOLS = process.env.MODEL_WITH_TOOLS || 'claude-sonnet-4-6';
 
 // ─── Firestore helpers ────────────────────────────────────────────────────────
 
@@ -75,16 +76,17 @@ app.post('/chat', async (req, res) => {
   const startMs = Date.now();
 
   try {
-    const tools    = getTools();
-    let messages   = [...history];
-    let totalIn    = 0;
-    let totalOut   = 0;
+    const tools        = getTools();
+    const activeModel  = tools.length > 0 ? MODEL_WITH_TOOLS : MODEL;
+    let messages       = [...history];
+    let totalIn        = 0;
+    let totalOut       = 0;
     let response;
 
     // ── Tool loop ──────────────────────────────────────────────────────────────
     do {
       response = await client.messages.create({
-        model:      MODEL,
+        model:      activeModel,
         max_tokens: 2048,
         system:     SYSTEM_PROMPT,
         messages,
@@ -121,17 +123,17 @@ app.post('/chat', async (req, res) => {
     // ── End tool loop ──────────────────────────────────────────────────────────
 
     const elapsedMs = Date.now() - startMs;
-    const pricing   = PRICING[MODEL] ?? { input: 0, output: 0 };
+    const pricing   = PRICING[activeModel] ?? { input: 0, output: 0 };
     const totalCost = ((totalIn / 1e6) * pricing.input) + ((totalOut / 1e6) * pricing.output);
 
-    console.log(`[${new Date().toISOString()}] session=${sessionId} time=${elapsedMs}ms in=${totalIn} out=${totalOut} cost=$${totalCost.toFixed(6)}`);
+    console.log(`[${new Date().toISOString()}] session=${sessionId} model=${activeModel} time=${elapsedMs}ms in=${totalIn} out=${totalOut} cost=$${totalCost.toFixed(6)}`);
 
     const rawText = response.content.find(b => b.type === 'text')?.text ?? '{}';
 
     let parsed;
     try {
-      const cleaned = rawText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-      parsed = JSON.parse(cleaned);
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
     } catch {
       // Claude didn't return JSON — preserve existing state, show message as-is
       const existingState = await getState(sessionId);
@@ -146,7 +148,7 @@ app.post('/chat', async (req, res) => {
       message: parsed.message ?? '',
       state:   parsed.state ?? {},
       meta: {
-        model:        MODEL,
+        model:        activeModel,
         responseMs:   elapsedMs,
         inputTokens:  totalIn,
         outputTokens: totalOut,
@@ -177,7 +179,7 @@ app.delete('/session/:id', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Voyager server running on http://localhost:${PORT}`);
-  console.log(`Model: ${MODEL}`);
+  console.log(`Model: ${MODEL} (with tools: ${MODEL_WITH_TOOLS})`);
   const activeTools = getTools().map(t => t.name);
   console.log(`Tools: ${activeTools.length ? activeTools.join(', ') : 'none'}`);
 });

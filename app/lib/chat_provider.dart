@@ -26,6 +26,8 @@ class Todo {
         text: j['text'] ?? '',
         done: j['done'] ?? false,
       );
+
+  Map<String, dynamic> toJson() => {'id': id, 'text': text, 'done': done};
 }
 
 class HolidayState {
@@ -77,6 +79,20 @@ class HolidayState {
     );
   }
 
+  Map<String, dynamic> toJson() => {
+    'tripTitle':     tripTitle,
+    'destination':   destination,
+    'dates':         {'from': dateFrom, 'to': dateTo},
+    'duration':      duration,
+    'travellers':    travellers,
+    'budget':        budget,
+    'accommodation': accommodation,
+    'vibe':          vibe,
+    'mustDos':       mustDos,
+    'constraints':   constraints,
+    'todos':         todos.map((t) => t.toJson()).toList(),
+  };
+
   static List<String> _toStringList(dynamic v) {
     if (v == null) return [];
     if (v is List) {
@@ -109,7 +125,12 @@ class ChatProvider extends ChangeNotifier {
     List<ChatMessage>? initialMessages,
   })  : sessionId = sessionId ?? const Uuid().v4(),
         state = initialState ?? const HolidayState(),
-        messages = List.from(initialMessages ?? []);
+        messages = List.from(initialMessages ?? []) {
+    // If reopening an existing trip with no cached messages, load from server
+    if (messages.isEmpty && (initialState?.destination != null)) {
+      _loadHistory();
+    }
+  }
 
   // Last call metadata
   int? lastResponseMs;
@@ -157,6 +178,31 @@ class ChatProvider extends ChangeNotifier {
 
     isLoading = false;
     notifyListeners();
+  }
+
+  Future<void> _loadHistory() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/session/$sessionId'));
+      if (res.statusCode != 200) return;
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      for (final msg in (data['history'] as List<dynamic>? ?? [])) {
+        final role    = msg['role'] as String?;
+        final content = msg['content'] as String?;
+        if (role == null || content == null) continue;
+        if (role == 'user') {
+          messages.add(ChatMessage(text: content, isUser: true));
+        } else if (role == 'assistant') {
+          try {
+            final cleaned = content.replaceAll(RegExp(r'^```json\n?'), '').replaceAll(RegExp(r'\n?```$'), '').trim();
+            final parsed  = jsonDecode(cleaned) as Map<String, dynamic>;
+            if (parsed['message'] != null) {
+              messages.add(ChatMessage(text: parsed['message'] as String, isUser: false));
+            }
+          } catch (_) {}
+        }
+      }
+      notifyListeners();
+    } catch (_) {}
   }
 
   void toggleTodo(String id) {

@@ -1,12 +1,25 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'firebase_options.dart';
 import 'trips_provider.dart';
 import 'trips_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Sign in anonymously — silent, automatic, no user action needed
+  final auth = FirebaseAuth.instance;
+  if (auth.currentUser == null) {
+    await auth.signInAnonymously();
+  }
+  final uid = auth.currentUser!.uid;
+
   runApp(
     ChangeNotifierProvider(
-      create: (_) => TripsProvider(),
+      create: (_) => TripsProvider(uid),
       child: const VoyagerApp(),
     ),
   );

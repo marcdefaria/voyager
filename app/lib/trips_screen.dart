@@ -34,7 +34,11 @@ class TripsScreen extends StatelessWidget {
           child: ChatScreen(
             trip: trip,
             onSave: (state, messages) {
-              tripsProvider.updateTrip(trip.id, state, messages);
+              if (state.destination == null && messages.isEmpty) {
+                tripsProvider.deleteTrip(trip.id);
+              } else {
+                tripsProvider.updateTrip(trip.id, state, messages);
+              }
             },
           ),
         ),
@@ -42,14 +46,16 @@ class TripsScreen extends StatelessWidget {
     );
   }
 
-  void _newTrip(BuildContext context) {
-    final trip = context.read<TripsProvider>().createTrip();
-    _openTrip(context, trip);
+  Future<void> _newTrip(BuildContext context) async {
+    final trip = await context.read<TripsProvider>().createTrip();
+    if (context.mounted) _openTrip(context, trip);
   }
 
   @override
   Widget build(BuildContext context) {
     final trips = context.watch<TripsProvider>().trips;
+
+    final isLoading = context.watch<TripsProvider>().isLoading;
 
     return Scaffold(
       backgroundColor: _bg,
@@ -58,7 +64,9 @@ class TripsScreen extends StatelessWidget {
         children: [
           _Header(onNewTrip: () => _newTrip(context)),
           Expanded(
-            child: trips.isEmpty
+            child: isLoading
+                ? const Center(child: CircularProgressIndicator(color: _accent))
+                : trips.isEmpty
                 ? _EmptyState(onNewTrip: () => _newTrip(context))
                 : ListView.builder(
                     padding: const EdgeInsets.all(24),
